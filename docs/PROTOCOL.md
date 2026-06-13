@@ -189,16 +189,9 @@ For the operations that require a physical button press (factory reset, set
 customer key), the device accepts the request over the wire and then waits for
 the user to press the up-arrow (▲) button to commit the change.
 
-## Known unknowns
+## Important
 
-1. **`get info` header/separator bytes.** The 3-byte preamble and the 2-byte
-   separator inside the `0x41` device-info response are skipped by offset; their
-   exact meaning is not documented here.
-2. **Public-data fields.** In the `0x70` seed-info TLV, only `SeedExist` is used
-   by the tool. The other fields (`tips`, `RTCTime`, `TimeCfg`, etc.) are read
-   past but not otherwise interpreted.
-3. **Firmware variance.** Lock/unlock (`0xD8`) is documented as v2.1+. Behaviour
-   on older firmware is undefined.
 
-Contributions adding hardware traces or clarifying the unknown fields are
-welcome.
+1. **Firmware variance.** Lock/unlock (`0xD8`) is implemented  as v2.1+.  
+
+ 
