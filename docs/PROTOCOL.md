@@ -1,4 +1,4 @@
-# Token2 Molto2 / Molto2v2 wire protocol
+# Token2 Molto2v2 wire protocol
 
 This document describes the wire protocol the Molto2 device speaks, as
 implemented by `molto2.py` in this repository. It is intended so contributors
