@@ -27,6 +27,10 @@ import argparse
 
 DEFAULT_CUSTOMER_KEY = "544F4B454E324D4F4C544F312D4B4559"
 
+# Distinct exit code so callers (e.g. the GUI) can detect "profile already has
+# a seed" without matching on the human-readable message text.
+EXIT_SEED_EXISTS = 3
+
 
 # ---------------------------------------------------------------------------
 # Pure helpers (no I/O, no device — safe to import and unit-test)
@@ -348,8 +352,9 @@ def write_seed(connection, key_sha1, prof, profile_number, seed, args):
     if not is_deleting:
         print(f"[i] Checking if profile [#{args.profile}] already has a seed...")
         if profile_has_seed(connection, profile_number):
-            die(f"[x] Profile #{args.profile} already has a seed. "
-                f"Delete it first using --seed {'00' * 20} or the --deleteseed command.")
+            print(f"[x] Profile #{args.profile} already has a seed. "
+                  f"Delete it first using --seed {'00' * 20} or the --deleteseed command.")
+            sys.exit(EXIT_SEED_EXISTS)
         print(f"[+] Profile [#{args.profile}] is empty. Proceeding with seed write.")
     else:
         print(f"[i] Deleting seed on profile [#{args.profile}] — skipping existence check.")

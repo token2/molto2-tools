@@ -497,31 +497,32 @@ window.show()
 def run_command(command):
     """
     Run a molto2 sub-command in-process by calling molto2.main(arglist).
-    Returns (success: bool, reason: str).
+    Returns (success: bool, reason: str, code: int) where code is the exit
+    code (0 on success).
 
     Running in-process (rather than spawning `python molto2.py ...`) keeps the
     customer key and TOTP seed out of the OS process table, and removes the
     dependency on molto2.py living in the current working directory.
     """
     buf = io.StringIO()
+    code = 0
     try:
         with redirect_stdout(buf), redirect_stderr(buf):
             molto2.main(command)
-        success = True
     except SystemExit as exc:
-        success = exc.code in (0, None)
+        code = 0 if exc.code is None else (exc.code if isinstance(exc.code, int) else 1)
     except Exception as exc:  # noqa: BLE001 - surface any unexpected failure to the log
-        return False, str(exc)
+        return False, str(exc), 1
 
     lines = buf.getvalue().strip().splitlines()
-    if success:
+    if code == 0:
         detail = next((l for l in reversed(lines) if l.startswith("[+")), "")
-        return True, detail
+        return True, detail, 0
     reason = next(
         (l for l in reversed(lines) if l.startswith(("[!", "[x", "[-"))),
         "Unknown error — check device connection and key."
     )
-    return False, reason
+    return False, reason, code
 
 
 def write_log(status: str, detail: str = "", is_error: bool = False):
@@ -548,11 +549,11 @@ def write_log(status: str, detail: str = "", is_error: bool = False):
 
 
 def dispatch(command, success_msg: str, error_prefix: str = ""):
-    ok, detail = run_command(command)
+    ok, detail, code = run_command(command)
     if ok:
         write_log(success_msg, detail, is_error=False)
     else:
-        if "already has a seed" in detail:
+        if code == molto2.EXIT_SEED_EXISTS:
             profile = cb_profile.currentText()
             reply = QMessageBox.warning(
                 window,

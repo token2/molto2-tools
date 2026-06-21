@@ -198,6 +198,16 @@ def test_sync_time_honours_timevalue():
     assert got == [0x84, 0xD4, 0x01, 2, len(tlv + mac)] + list(tlv + mac)
 
 
+def test_write_seed_exits_with_distinct_code_when_seed_exists(monkeypatch):
+    # #8: a populated profile must exit with EXIT_SEED_EXISTS so callers can
+    # detect it by code rather than by matching the message text.
+    monkeypatch.setattr(m, "profile_has_seed", lambda conn, n: True)
+    with pytest.raises(SystemExit) as exc:
+        with redirect_stdout(io.StringIO()):
+            m.write_seed(MockConn(), KEY, "02", 2, "DEADBEEFDEADBEEF", Namespace(profile="2"))
+    assert exc.value.code == m.EXIT_SEED_EXISTS
+
+
 def test_write_seed_delete_path_apdu():
     args = Namespace(profile="2")
     got = _run(m.write_seed, KEY, "02", 2, "00" * 20, args)[-1]
