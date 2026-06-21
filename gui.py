@@ -5,11 +5,13 @@
 # Released under the MIT License. See LICENSE.md for details.
 
 import sys
-import subprocess
+import io
 import secrets
 import base64
+from contextlib import redirect_stdout, redirect_stderr
 from datetime import datetime
 
+import molto2
 from smartcard.System import readers
 from PyQt5.QtWidgets import (
     QApplication, QDialog, QTableWidgetItem, QMessageBox,
@@ -18,167 +20,16 @@ from PyQt5.QtWidgets import (
     QTableWidget, QHeaderView, QSizePolicy, QFrame, QSpacerItem
 )
 from PyQt5.QtGui import QColor, QFont, QPalette
-from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtCore import Qt, QTimer, QThread, QEventLoop, pyqtSignal
 
 # ---------------------------------------------------------------------------
 # Build the GUI programmatically (no .ui file dependency)
 # ---------------------------------------------------------------------------
 
+from gui_common import apply_theme
+
 app = QApplication(sys.argv)
-app.setStyle("Fusion")
-
-# Light palette
-palette = QPalette()
-palette.setColor(QPalette.Window,          QColor(242, 244, 248))
-palette.setColor(QPalette.WindowText,      QColor(25,  30,  50))
-palette.setColor(QPalette.Base,            QColor(255, 255, 255))
-palette.setColor(QPalette.AlternateBase,   QColor(235, 238, 245))
-palette.setColor(QPalette.ToolTipBase,     QColor(255, 255, 220))
-palette.setColor(QPalette.ToolTipText,     QColor(25,  30,  50))
-palette.setColor(QPalette.Text,            QColor(25,  30,  50))
-palette.setColor(QPalette.Button,          QColor(220, 224, 235))
-palette.setColor(QPalette.ButtonText,      QColor(25,  30,  50))
-palette.setColor(QPalette.BrightText,      Qt.red)
-palette.setColor(QPalette.Highlight,       QColor(0,   112, 200))
-palette.setColor(QPalette.HighlightedText, Qt.white)
-app.setPalette(palette)
-
-STYLESHEET = """
-QWidget {
-    font-family: 'Segoe UI', Arial, sans-serif;
-    font-size: 13px;
-    color: #191e32;
-    background-color: #f2f4f8;
-}
-QGroupBox {
-    border: 1px solid #c5cade;
-    border-radius: 7px;
-    margin-top: 12px;
-    padding-top: 10px;
-    font-weight: bold;
-    color: #4a5478;
-    background-color: #ffffff;
-}
-QGroupBox::title {
-    subcontrol-origin: margin;
-    left: 12px;
-    padding: 0 5px;
-}
-QLineEdit, QComboBox {
-    background-color: #ffffff;
-    border: 1px solid #b8bdd4;
-    border-radius: 5px;
-    padding: 5px 9px;
-    color: #191e32;
-}
-QLineEdit:focus, QComboBox:focus {
-    border: 1.5px solid #0070c8;
-}
-QComboBox::drop-down { border: none; width: 20px; }
-QComboBox QAbstractItemView {
-    background-color: #ffffff;
-    border: 1px solid #b8bdd4;
-    color: #191e32;
-    selection-background-color: #0070c8;
-    selection-color: white;
-    padding: 2px;
-}
-QComboBox QAbstractItemView::item {
-    min-height: 28px;
-    padding: 4px 8px;
-}
-QPushButton {
-    background-color: #e4e7f2;
-    border: 1px solid #b8bdd4;
-    border-radius: 5px;
-    padding: 6px 14px;
-    color: #191e32;
-}
-QPushButton:hover   { background-color: #d2d7ec; border-color: #8890b8; }
-QPushButton:pressed { background-color: #c0c7e0; }
-QPushButton#btn_primary {
-    background-color: #0070c8;
-    border-color: #0058a0;
-    color: white;
-    font-weight: bold;
-}
-QPushButton#btn_primary:hover   { background-color: #1a82d8; }
-QPushButton#btn_primary:pressed { background-color: #0058a0; }
-QPushButton#btn_danger {
-    background-color: #c0392b;
-    border-color: #962d22;
-    color: white;
-    font-weight: bold;
-}
-QPushButton#btn_danger:hover   { background-color: #d44637; }
-QPushButton#btn_danger:pressed { background-color: #962d22; }
-QPushButton#btn_warning {
-    background-color: #e67e22;
-    border-color: #b8621a;
-    color: white;
-    font-weight: bold;
-}
-QPushButton#btn_warning:hover   { background-color: #f08c35; }
-QPushButton#btn_warning:pressed { background-color: #b8621a; }
-QPushButton#btn_secondary {
-    background-color: #6c757d;
-    border-color: #545b62;
-    color: white;
-}
-QPushButton#btn_secondary:hover   { background-color: #7d868f; }
-QPushButton#btn_secondary:pressed { background-color: #545b62; }
-QCheckBox { spacing: 6px; }
-QTabWidget::pane {
-    border: 1px solid #c5cade;
-    border-radius: 6px;
-    background-color: #f2f4f8;
-}
-QTabBar::tab {
-    background-color: #dde0ee;
-    border: 1px solid #c5cade;
-    border-bottom: none;
-    border-radius: 5px 5px 0 0;
-    padding: 6px 18px;
-    margin-right: 3px;
-    color: #5a6080;
-}
-QTabBar::tab:selected { background-color: #f2f4f8; color: #191e32; border-bottom: 1px solid #f2f4f8; }
-QTabBar::tab:hover    { background-color: #cdd2e8; color: #191e32; }
-QTableWidget {
-    background-color: #ffffff;
-    alternate-background-color: #f0f2f8;
-    gridline-color: #dde0ee;
-    border: 1px solid #c5cade;
-    border-radius: 4px;
-}
-QTableWidget::item { padding: 3px 6px; }
-QHeaderView::section {
-    background-color: #e4e7f2;
-    border: none;
-    border-right: 1px solid #c5cade;
-    border-bottom: 1px solid #c5cade;
-    padding: 5px 8px;
-    color: #4a5478;
-    font-weight: bold;
-}
-QScrollBar:vertical {
-    background: #e4e7f2; width: 10px; border-radius: 5px;
-}
-QScrollBar::handle:vertical {
-    background: #a8b0cc; border-radius: 5px; min-height: 20px;
-}
-QLabel#status_bar {
-    border-radius: 5px;
-    padding: 5px 12px;
-    font-weight: bold;
-    font-size: 13px;
-}
-QFrame#divider {
-    background-color: #c5cade;
-    max-height: 1px;
-}
-"""
-app.setStyleSheet(STYLESHEET)
+apply_theme(app)
 
 
 # ---------------------------------------------------------------------------
@@ -492,23 +343,75 @@ window.show()
 # Helpers
 # ---------------------------------------------------------------------------
 
+class _DeviceWorker(QThread):
+    """Runs a molto2 sub-command in a background thread so the device I/O does
+    not block the UI. Emits (success, detail, code)."""
+
+    done = pyqtSignal(bool, str, int)
+
+    def __init__(self, command):
+        super().__init__()
+        self.command = command
+
+    def run(self):
+        buf = io.StringIO()
+        code = 0
+        try:
+            with redirect_stdout(buf), redirect_stderr(buf):
+                molto2.main(self.command)
+        except SystemExit as exc:
+            code = 0 if exc.code is None else (exc.code if isinstance(exc.code, int) else 1)
+        except Exception as exc:  # noqa: BLE001 - surface any unexpected failure
+            self.done.emit(False, str(exc), 1)
+            return
+
+        lines = buf.getvalue().strip().splitlines()
+        if code == 0:
+            detail = next((l for l in reversed(lines) if l.startswith("[+")), "")
+            self.done.emit(True, detail, 0)
+        else:
+            reason = next(
+                (l for l in reversed(lines) if l.startswith(("[!", "[x", "[-"))),
+                "Unknown error — check device connection and key."
+            )
+            self.done.emit(False, reason, code)
+
+
 def run_command(command):
     """
-    Run a molto2.py sub-command.
-    Returns (success: bool, reason: str).
-    Success is determined solely by exit code (check=False so we control it).
+    Run a molto2 sub-command in a worker thread, keeping the UI responsive.
+    Returns (success: bool, reason: str, code: int) where code is the exit
+    code (0 on success).
+
+    The work runs on a _DeviceWorker thread while a local event loop pumps UI
+    events here, so long operations (e.g. Sync ALL across 100 profiles) no
+    longer freeze the window (#11). run_command stays synchronous, so dispatch
+    and the provisioning chain are unchanged. Running molto2 in-process (rather
+    than spawning `python molto2.py ...`) also keeps the customer key and TOTP
+    seed out of the OS process table (#7).
     """
-    result = subprocess.run(command, capture_output=True, text=True)
-    lines = (result.stdout + result.stderr).strip().splitlines()
-    if result.returncode == 0:
-        detail = next((l for l in reversed(lines) if l.startswith("[+")), "")
-        return True, detail
-    else:
-        reason = next(
-            (l for l in reversed(lines) if l.startswith(("[!", "[x", "[-"))),
-            "Unknown error — check device connection and key."
-        )
-        return False, reason
+    # Pause connection polling and disable the tabs so the 2s reader poll and
+    # re-entrant clicks cannot open a competing PC/SC connection while this
+    # operation holds the device (#12).
+    timer.stop()
+    tabs.setEnabled(False)
+    result = {"value": (False, "Unknown error — check device connection and key.", 1)}
+
+    worker = _DeviceWorker(command)
+    loop = QEventLoop()
+
+    def _on_done(ok, detail, code):
+        result["value"] = (ok, detail, code)
+        loop.quit()
+
+    worker.done.connect(_on_done)
+    worker.start()
+    loop.exec_()       # keeps the UI responsive while the worker runs
+    worker.wait()
+
+    tabs.setEnabled(True)
+    timer.start(2000)
+    return result["value"]
 
 
 def write_log(status: str, detail: str = "", is_error: bool = False):
@@ -535,11 +438,11 @@ def write_log(status: str, detail: str = "", is_error: bool = False):
 
 
 def dispatch(command, success_msg: str, error_prefix: str = ""):
-    ok, detail = run_command(command)
+    ok, detail, code = run_command(command)
     if ok:
         write_log(success_msg, detail, is_error=False)
     else:
-        if "already has a seed" in detail:
+        if code == molto2.EXIT_SEED_EXISTS:
             profile = cb_profile.currentText()
             reply = QMessageBox.warning(
                 window,
@@ -649,7 +552,7 @@ def set_title():
         write_log("Set title skipped", "Title field is empty.", is_error=True)
         return
     dispatch(
-        [sys.executable, "molto2.py", "--profile", profile, "--title", title]
+        ["--profile", profile, "--title", title]
         + get_key_args(),
         success_msg="Title set",
         error_prefix="Set title failed",
@@ -665,7 +568,7 @@ def factory_reset():
         write_log("Factory reset", "Cancelled by user.")
         return
     dispatch(
-        [sys.executable, "molto2.py", "--factoryreset"] + get_key_args(),
+        ["--factoryreset"] + get_key_args(),
         success_msg="Factory reset initiated — confirm on device",
         error_prefix="Factory reset failed",
     )
@@ -678,7 +581,7 @@ def write_seed_only():
         write_log("Write seed skipped", "Seed field is empty.", is_error=True)
         return
     dispatch(
-        [sys.executable, "molto2.py", "--profile", profile]
+        ["--profile", profile]
         + get_seed_args()
         + get_key_args(),
         success_msg=f"Seed written to profile #{profile}",
@@ -696,7 +599,7 @@ def remove_seed():
         write_log(f"Delete seed #{profile}", "Cancelled by user.")
         return
     dispatch(
-        [sys.executable, "molto2.py", "--profile", profile, "--deleteseed"]
+        ["--profile", profile, "--deleteseed"]
         + get_key_args(),
         success_msg=f"Seed deleted from profile #{profile}",
         error_prefix=f"Seed delete failed for profile #{profile}",
@@ -706,7 +609,7 @@ def remove_seed():
 def apply_only_config():
     profile = cb_profile.currentText()
     dispatch(
-        [sys.executable, "molto2.py", "--config", "--profile", profile]
+        ["--config", "--profile", profile]
         + get_config_args()
         + get_key_args(),
         success_msg=f"Config applied to profile #{profile}",
@@ -722,7 +625,7 @@ def provision_without_config():
         write_log("Provision skipped", "Seed field is empty.", is_error=True)
         return
     cmd = (
-        [sys.executable, "molto2.py", "--profile", profile]
+        ["--profile", profile]
         + get_seed_args()
         + (["--title", title] if title else [])
         + get_key_args()
@@ -742,7 +645,7 @@ def provision_with_config():
 
     # Step 1: apply config first (requires empty profile)
     cmd_cfg = (
-        [sys.executable, "molto2.py", "--config", "--profile", profile]
+        ["--config", "--profile", profile]
         + get_config_args()
         + get_key_args()
     )
@@ -754,7 +657,7 @@ def provision_with_config():
 
     # Step 2: write seed (+ optional title)
     cmd_seed = (
-        [sys.executable, "molto2.py", "--profile", profile]
+        ["--profile", profile]
         + get_seed_args()
         + (["--title", title] if title else [])
         + get_key_args()
@@ -773,7 +676,7 @@ def provision():
 
 def lock_device():
     dispatch(
-        [sys.executable, "molto2.py", "--lock"] + get_key_args(),
+        ["--lock"] + get_key_args(),
         success_msg="Device screen locked",
         error_prefix="Lock failed",
     )
@@ -781,7 +684,7 @@ def lock_device():
 
 def unlock_device():
     dispatch(
-        [sys.executable, "molto2.py", "--unlock"] + get_key_args(),
+        ["--unlock"] + get_key_args(),
         success_msg="Device screen unlocked",
         error_prefix="Unlock failed",
     )
@@ -790,7 +693,7 @@ def unlock_device():
 def sync_time_one():
     profile = cb_sync_profile.currentText()
     dispatch(
-        [sys.executable, "molto2.py", "--profile", profile, "--synctime"]
+        ["--profile", profile, "--synctime"]
         + get_key_args(),
         success_msg=f"Time synced on profile #{profile}",
         error_prefix=f"Time sync failed for profile #{profile}",
@@ -806,7 +709,7 @@ def sync_time_all():
         write_log("Sync all profiles", "Cancelled by user.")
         return
     dispatch(
-        [sys.executable, "molto2.py", "--synctimeall"] + get_key_args(),
+        ["--synctimeall"] + get_key_args(),
         success_msg="Time synced on ALL profiles",
         error_prefix="Time sync (all profiles) failed",
     )
@@ -841,7 +744,7 @@ def set_customer_key():
 
     key_flag = "--setkey" if use_hex else "--setkeyascii"
     dispatch(
-        [sys.executable, "molto2.py", key_flag, new_key] + get_key_args(),
+        [key_flag, new_key] + get_key_args(),
         success_msg="Customer key change sent — confirm on device (▲)",
         error_prefix="Customer key change failed",
     )
