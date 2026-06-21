@@ -135,6 +135,10 @@ Then launch it from the same directory:
 
     python3 gui.py
 
+Running it opens the configuration window:
+
+![TOKEN2 Molto2 Config Tool GUI](assets/molto2-gui.png)
+
 `gui.py` calls `molto2.py` under the hood, so keep both files together. A self-contained
 variant, `gui-single.py`, embeds the device logic directly and can be run on its own:
 
