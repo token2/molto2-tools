@@ -506,6 +506,9 @@ def run_command(command):
     """
     buf = io.StringIO()
     code = 0
+    # Pause connection polling so the 2s reader poll cannot open a competing
+    # PC/SC connection while this operation holds the device (#12).
+    timer.stop()
     try:
         with redirect_stdout(buf), redirect_stderr(buf):
             molto2.main(command)
@@ -513,6 +516,8 @@ def run_command(command):
         code = 0 if exc.code is None else (exc.code if isinstance(exc.code, int) else 1)
     except Exception as exc:  # noqa: BLE001 - surface any unexpected failure to the log
         return False, str(exc), 1
+    finally:
+        timer.start(2000)
 
     lines = buf.getvalue().strip().splitlines()
     if code == 0:
