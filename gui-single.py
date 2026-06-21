@@ -114,6 +114,16 @@ def molto2_run(args: dict):
     serial = info[4:4 + serial_len].decode("utf-8")
     print(f"[+] device serial: {serial}")
 
+    # ── Factory reset (no authentication required) ─────────────────────────
+    # Must run before the auth handshake: a forgotten/incorrect customer key
+    # is exactly when a factory reset is needed for recovery.
+    if args.get("factoryreset"):
+        _data, sw1, _sw2 = conn.transmit([0x80, 0x56, 0x00, 0x00, 0x00])
+        if not _sw_ok(sw1):
+            _die(f"[!] Factory reset request failed (SW={hex(sw1)}{hex(_sw2)})")
+        print("[+] Factory reset request sent — PLEASE CONFIRM ON THE DEVICE BY PRESSING ▲")
+        return
+
     # ── Resolve customer key ───────────────────────────────────────────────
     customer_key = _resolve_key(args.get("key"), args.get("keyascii"))
     key_sha1 = hashlib.sha1(customer_key).digest()[:16]
@@ -140,11 +150,6 @@ def molto2_run(args: dict):
     if not _sw_ok(sw1):
         _die("[-] Authentication failed")
     print("[+] Authentication successful")
-
-    # ── Factory reset ──────────────────────────────────────────────────────
-    if args.get("factoryreset"):
-        conn.transmit([0x80, 0x56, 0x00, 0x00, 0x00])
-        _die("[!] PLEASE CONFIRM ON THE DEVICE BY PRESSING ▲")
 
     # ── Delete seed ────────────────────────────────────────────────────────
     if args.get("deleteseed"):
