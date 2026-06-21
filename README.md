@@ -18,14 +18,42 @@ Installation
 ------------
 The script is written for Python 3.
 
-Install the requirements:
+### Recommended: a dedicated virtual environment
 
+Using a project virtual environment avoids the most common setup problem: `pip`
+and `python3` resolving to *different* Python interpreters (e.g. a Homebrew
+`python3` and an Anaconda `pip`), so a package installed by `pip` is not visible
+to `python3`. It also sidesteps the "externally-managed-environment" (PEP 668)
+error that Homebrew/Debian Python raise for system-wide installs.
+
+Create the environment once, then activate it whenever you use the tool:
+
+    python3 -m venv .venv
+    source .venv/bin/activate          # Windows: .venv\Scripts\activate
     pip install -r requirements.txt
 
-(or `pip3 install -r requirements.txt`). You can also install them one by one:
+    python molto2.py
 
-    pip install pyscard
-    pip install sm4
+While the environment is active, `python` and `pip` both refer to it, so there
+is no interpreter mismatch. Run `deactivate` to leave it. The `.venv/` directory
+is git-ignored.
+
+### Without a virtual environment
+
+If you prefer a global install, make sure you install for the **same**
+interpreter you run. Using `python3 -m pip` guarantees this:
+
+    python3 -m pip install -r requirements.txt
+    python3 molto2.py
+
+(You can also install the requirements one by one: `pip install pyscard` and
+`pip install sm4`.)
+
+**Troubleshooting `ModuleNotFoundError: No module named 'sm4'`** even though the
+install "succeeded": your `pip` and `python3` are different interpreters. Check
+with `which python3`, `python3 -V`, `pip -V` — if they disagree, install with
+`python3 -m pip install -r requirements.txt`, or just use a virtual environment
+as above.
 
 PCSC installation and configuration
 -----------------------------------
