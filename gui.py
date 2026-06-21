@@ -20,7 +20,7 @@ from PyQt5.QtWidgets import (
     QTableWidget, QHeaderView, QSizePolicy, QFrame, QSpacerItem
 )
 from PyQt5.QtGui import QColor, QFont, QPalette
-from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtCore import Qt, QTimer, QThread, QEventLoop, pyqtSignal
 
 # ---------------------------------------------------------------------------
 # Build the GUI programmatically (no .ui file dependency)
@@ -343,40 +343,75 @@ window.show()
 # Helpers
 # ---------------------------------------------------------------------------
 
+class _DeviceWorker(QThread):
+    """Runs a molto2 sub-command in a background thread so the device I/O does
+    not block the UI. Emits (success, detail, code)."""
+
+    done = pyqtSignal(bool, str, int)
+
+    def __init__(self, command):
+        super().__init__()
+        self.command = command
+
+    def run(self):
+        buf = io.StringIO()
+        code = 0
+        try:
+            with redirect_stdout(buf), redirect_stderr(buf):
+                molto2.main(self.command)
+        except SystemExit as exc:
+            code = 0 if exc.code is None else (exc.code if isinstance(exc.code, int) else 1)
+        except Exception as exc:  # noqa: BLE001 - surface any unexpected failure
+            self.done.emit(False, str(exc), 1)
+            return
+
+        lines = buf.getvalue().strip().splitlines()
+        if code == 0:
+            detail = next((l for l in reversed(lines) if l.startswith("[+")), "")
+            self.done.emit(True, detail, 0)
+        else:
+            reason = next(
+                (l for l in reversed(lines) if l.startswith(("[!", "[x", "[-"))),
+                "Unknown error — check device connection and key."
+            )
+            self.done.emit(False, reason, code)
+
+
 def run_command(command):
     """
-    Run a molto2 sub-command in-process by calling molto2.main(arglist).
+    Run a molto2 sub-command in a worker thread, keeping the UI responsive.
     Returns (success: bool, reason: str, code: int) where code is the exit
     code (0 on success).
 
-    Running in-process (rather than spawning `python molto2.py ...`) keeps the
-    customer key and TOTP seed out of the OS process table, and removes the
-    dependency on molto2.py living in the current working directory.
+    The work runs on a _DeviceWorker thread while a local event loop pumps UI
+    events here, so long operations (e.g. Sync ALL across 100 profiles) no
+    longer freeze the window (#11). run_command stays synchronous, so dispatch
+    and the provisioning chain are unchanged. Running molto2 in-process (rather
+    than spawning `python molto2.py ...`) also keeps the customer key and TOTP
+    seed out of the OS process table (#7).
     """
-    buf = io.StringIO()
-    code = 0
-    # Pause connection polling so the 2s reader poll cannot open a competing
-    # PC/SC connection while this operation holds the device (#12).
+    # Pause connection polling and disable the tabs so the 2s reader poll and
+    # re-entrant clicks cannot open a competing PC/SC connection while this
+    # operation holds the device (#12).
     timer.stop()
-    try:
-        with redirect_stdout(buf), redirect_stderr(buf):
-            molto2.main(command)
-    except SystemExit as exc:
-        code = 0 if exc.code is None else (exc.code if isinstance(exc.code, int) else 1)
-    except Exception as exc:  # noqa: BLE001 - surface any unexpected failure to the log
-        return False, str(exc), 1
-    finally:
-        timer.start(2000)
+    tabs.setEnabled(False)
+    result = {"value": (False, "Unknown error — check device connection and key.", 1)}
 
-    lines = buf.getvalue().strip().splitlines()
-    if code == 0:
-        detail = next((l for l in reversed(lines) if l.startswith("[+")), "")
-        return True, detail, 0
-    reason = next(
-        (l for l in reversed(lines) if l.startswith(("[!", "[x", "[-"))),
-        "Unknown error — check device connection and key."
-    )
-    return False, reason, code
+    worker = _DeviceWorker(command)
+    loop = QEventLoop()
+
+    def _on_done(ok, detail, code):
+        result["value"] = (ok, detail, code)
+        loop.quit()
+
+    worker.done.connect(_on_done)
+    worker.start()
+    loop.exec_()       # keeps the UI responsive while the worker runs
+    worker.wait()
+
+    tabs.setEnabled(True)
+    timer.start(2000)
+    return result["value"]
 
 
 def write_log(status: str, detail: str = "", is_error: bool = False):
