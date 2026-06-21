@@ -29,31 +29,91 @@ Install the requirements:
 
 PCSC installation and configuration
 -----------------------------------
-The script uses the PCSC service to communicate with the device, so a few components
-need to be installed first:
+The tool talks to the device through the PCSC (PC/SC) service. The Python code is
+identical on every platform — only the PCSC setup differs. PCSC is available on Linux,
+macOS and Windows; follow the section for your operating system below.
 
-    sudo apt-get install libusb-dev libusb++
-    sudo apt-get install libccid
-    sudo apt-get install pcscd
-    sudo apt-get install libpcsclite1
-    sudo apt-get install libpcsclite-dev
-    sudo apt-get install pcsc-tools
+The Molto2v2 enumerates with USB vendor ID `0x349E` and product ID `0x0300`. PCSC ships
+with a predefined list of supported readers, and as the Molto2v2 is a relatively new
+product it is not in that list by default. On Linux it therefore has to be added to the
+CCID driver manually (see *Registering the device with the CCID driver* below); on
+recent macOS it is often picked up automatically.
 
-PCSC ships with a predefined list of supported hardware, primarily smart card readers.
-As the Molto2v2 is a relatively new product, it is not listed in the default
-configuration, so it has to be added manually:
+### Linux — Debian / Ubuntu
 
- - Open the device list file, usually located at the path below (the exact folder name
-   may vary slightly):
+Install the PCSC stack:
 
-       sudo nano /usr/lib/pcsc/drivers/ifd-ccid.bundle/Contents/Info.plist
+    sudo apt-get install libusb-dev libccid pcscd libpcsclite1 libpcsclite-dev pcsc-tools
 
-   (if the file is not found, try `sudo find / -name Info.plist`).
+The `pcscd` daemon is started automatically by the package. The CCID driver list lives
+at:
 
- - Add `<string>0x349E</string>` at the end of the `<key>ifdVendorID</key>` section.
- - Add `<string>0x0300</string>` at the end of the `<key>ifdProductID</key>` section.
- - Add `<string>Token2 Molto2</string>` at the end of the `<key>ifdFriendlyName</key>` section.
- - Save the file and restart the system for the changes to take effect.
+    /usr/lib/pcsc/drivers/ifd-ccid.bundle/Contents/Info.plist
+
+### Linux — RHEL / Fedora / Rocky / AlmaLinux
+
+The package names differ from Debian. Install the PCSC stack with `dnf`:
+
+    sudo dnf install pcsc-lite pcsc-lite-ccid pcsc-lite-devel libusb1-devel pcsc-tools
+
+(`pcsc-tools` is optional and may require the EPEL repository on RHEL / Rocky / Alma.)
+
+Enable and start the daemon:
+
+    sudo systemctl enable --now pcscd
+
+On 64-bit RPM distributions the CCID driver list lives under `lib64`:
+
+    /usr/lib64/pcsc/drivers/ifd-ccid.bundle/Contents/Info.plist
+
+### macOS
+
+macOS has PCSC built in — there is no daemon to install. Since macOS Sonoma the system
+uses the standard CCID driver, and a class-compliant CCID reader like the Molto2 is
+often recognised with no configuration at all. First just plug the device in and run:
+
+    python3 molto2.py
+
+If you see the device serial number, you are done — no further setup is needed.
+
+If the device is *not* detected, it has to be registered with the CCID driver. Note that
+the system driver bundle at
+`/usr/libexec/SmartCardServices/drivers/ifd-ccid.bundle` lives on the SIP-protected,
+read-only system volume and **cannot** be edited, even with `sudo`. Instead, register the
+device in the user-writable override location:
+
+    # Copy Apple's CCID bundle into the override directory
+    sudo mkdir -p /usr/local/libexec/SmartCardServices/drivers
+    sudo cp -R /usr/libexec/SmartCardServices/drivers/ifd-ccid.bundle \
+               /usr/local/libexec/SmartCardServices/drivers/
+
+    # Edit the COPY (never the system one — that is read-only under SIP)
+    sudo nano /usr/local/libexec/SmartCardServices/drivers/ifd-ccid.bundle/Contents/Info.plist
+
+Add the Molto2 IDs as described below, then unplug and re-plug the device (or reboot).
+
+### Windows
+
+Windows ships the Smart Card service (WinSCard) and a built-in CCID driver, so the tool
+runs without extra installation. If the device is not recognised, install Token2's
+Windows driver / the device's INF as provided by the vendor.
+
+### Registering the device with the CCID driver
+
+When manual registration is required (always on Linux, only if auto-detection fails on
+macOS), open the `Info.plist` for your OS shown above and add the Molto2v2 to the three
+parallel arrays:
+
+ - Add `<string>0x349E</string>` at the end of the `<key>ifdVendorID</key>` array.
+ - Add `<string>0x0300</string>` at the end of the `<key>ifdProductID</key>` array.
+ - Add `<string>Token2 Molto2</string>` at the end of the `<key>ifdFriendlyName</key>` array.
+
+These three arrays are positional: the new entry must sit at the **same index** in all
+three. Save the file, then apply the change by restarting the PCSC service
+(`sudo systemctl restart pcscd` on Linux) or by re-plugging the device / rebooting on
+macOS.
+
+(If you cannot locate the file, try `sudo find / -name Info.plist -path '*ifd-ccid*'`.)
 
 Usage
 -----
@@ -155,4 +215,4 @@ Developed by the Token2 R&D Team (https://www.token2.com/).
 Protocol
 --------
 The device wire protocol (APDUs, SM4/MAC construction, TLV layouts) is
-documented in [docs/PROTOCOL.md](docs/PROTOCOL.md).
+documented in [docs/MOLTO2-PROTOCOL.md](docs/MOLTO2-PROTOCOL.md).
