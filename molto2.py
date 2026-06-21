@@ -53,6 +53,40 @@ def derive_session_key(customer_key: bytes) -> bytes:
     return hashlib.sha1(customer_key).digest()[:16]
 
 
+def validate_profile_number(profile):
+    """Parse and range-check a profile number (0-99); exits on bad input."""
+    try:
+        n = int(profile)
+    except (TypeError, ValueError):
+        die(f"[!] Invalid profile number '{profile}' (must be an integer 0-99).")
+    if n < 0 or n > 99:
+        die(f"[!] Profile number {n} is out of range (must be 0-99).")
+    return n
+
+
+def resolve_customer_key(key_hex=None, key_ascii=None) -> bytes:
+    """Resolve the 16-byte customer key from --key/--keyascii or the default.
+
+    Validates that the key is valid hex and exactly 16 bytes; exits otherwise.
+    """
+    if key_hex is None and key_ascii is None:
+        print('[!] Note: No customer key was provided, default customer key will be used')
+        hexstr = DEFAULT_CUSTOMER_KEY
+    elif key_ascii is not None:
+        # --keyascii takes precedence if both are supplied (matches prior behaviour)
+        hexstr = key_ascii.encode('utf-8').hex().upper()
+    else:
+        hexstr = key_hex
+
+    try:
+        key = unhexlify(hexstr)
+    except (ValueError, TypeError):
+        die("[!] Customer key is not valid hex.")
+    if len(key) != 16:
+        die(f"[!] Customer key must be 16 bytes ({len(key)} provided).")
+    return key
+
+
 def base32_to_hex(seedbase32: str) -> str:
     """Convert a base32 seed (RFC 4648, padding optional) to an uppercase hex string."""
     normalized_seed32 = str(seedbase32 + '=' * (-len(seedbase32) % 8))
@@ -569,20 +603,11 @@ def main(argv=None):
         if len(args.title.encode("utf-8")) > 12:
             die("[!] Profile title cannot be longer than 12 bytes (UTF-8)")
 
-    # Default customer key
-    if args.key is None and args.keyascii is None:
-        customer_key = DEFAULT_CUSTOMER_KEY
-        print('[!] Note: No customer key was provided, default customer key will be used')
-    else:
-        if args.key is not None:
-            customer_key = args.key
-        if args.keyascii is not None:
-            customer_key = args.keyascii.encode('utf-8').hex().upper()
-
-    customer_key = unhexlify(customer_key)
+    # Resolve and validate the customer key
+    customer_key = resolve_customer_key(args.key, args.keyascii)
 
     if args.profile is not None:
-        profile_number = int(args.profile)
+        profile_number = validate_profile_number(args.profile)
         prof = hex(profile_number)[2:].zfill(2)
     else:
         profile_number = 0x00

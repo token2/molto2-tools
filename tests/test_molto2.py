@@ -50,6 +50,44 @@ def test_base32_to_hex():
     assert m.base32_to_hex("JBSWY3DPEHPK3PXP") == "48656C6C6F21DEADBEEF"
 
 
+# ---- input validation (#10) ----
+
+@pytest.mark.parametrize("value,expected", [("0", 0), ("50", 50), ("99", 99)])
+def test_validate_profile_number_accepts_valid(value, expected):
+    assert m.validate_profile_number(value) == expected
+
+
+@pytest.mark.parametrize("value", ["100", "-1", "abc", None, "3.5"])
+def test_validate_profile_number_rejects_invalid(value):
+    with pytest.raises(SystemExit) as exc:
+        with redirect_stdout(io.StringIO()):
+            m.validate_profile_number(value)
+    assert exc.value.code != 0
+
+
+def test_resolve_customer_key_default_is_16_bytes():
+    with redirect_stdout(io.StringIO()):
+        key = m.resolve_customer_key(None, None)
+    assert key == unhexlify(m.DEFAULT_CUSTOMER_KEY) and len(key) == 16
+
+
+def test_resolve_customer_key_hex_and_ascii():
+    assert m.resolve_customer_key("00" * 16, None) == b"\x00" * 16
+    assert m.resolve_customer_key(None, "TOKEN2MOLTO1-KEY") == b"TOKEN2MOLTO1-KEY"
+
+
+def test_resolve_customer_key_ascii_wins_when_both_supplied():
+    assert m.resolve_customer_key("00" * 16, "TOKEN2MOLTO1-KEY") == b"TOKEN2MOLTO1-KEY"
+
+
+@pytest.mark.parametrize("key_hex", ["xyz", "00" * 15, "0" * 31])
+def test_resolve_customer_key_rejects_bad_input(key_hex):
+    with pytest.raises(SystemExit) as exc:
+        with redirect_stdout(io.StringIO()):
+            m.resolve_customer_key(key_hex, None)
+    assert exc.value.code != 0
+
+
 @pytest.mark.parametrize("hexseed", ["00" * 20, "00" * 16, "0000", "00"])
 def test_pad_seed_all_zero_clears_for_any_length(hexseed):
     # #6: an all-zero seed of ANY length is the delete sentinel -> zero-padded,

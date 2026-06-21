@@ -5,11 +5,13 @@
 # Released under the MIT License. See LICENSE.md for details.
 
 import sys
-import subprocess
+import io
 import secrets
 import base64
+from contextlib import redirect_stdout, redirect_stderr
 from datetime import datetime
 
+import molto2
 from smartcard.System import readers
 from PyQt5.QtWidgets import (
     QApplication, QDialog, QTableWidgetItem, QMessageBox,
@@ -494,21 +496,32 @@ window.show()
 
 def run_command(command):
     """
-    Run a molto2.py sub-command.
+    Run a molto2 sub-command in-process by calling molto2.main(arglist).
     Returns (success: bool, reason: str).
-    Success is determined solely by exit code (check=False so we control it).
+
+    Running in-process (rather than spawning `python molto2.py ...`) keeps the
+    customer key and TOTP seed out of the OS process table, and removes the
+    dependency on molto2.py living in the current working directory.
     """
-    result = subprocess.run(command, capture_output=True, text=True)
-    lines = (result.stdout + result.stderr).strip().splitlines()
-    if result.returncode == 0:
+    buf = io.StringIO()
+    try:
+        with redirect_stdout(buf), redirect_stderr(buf):
+            molto2.main(command)
+        success = True
+    except SystemExit as exc:
+        success = exc.code in (0, None)
+    except Exception as exc:  # noqa: BLE001 - surface any unexpected failure to the log
+        return False, str(exc)
+
+    lines = buf.getvalue().strip().splitlines()
+    if success:
         detail = next((l for l in reversed(lines) if l.startswith("[+")), "")
         return True, detail
-    else:
-        reason = next(
-            (l for l in reversed(lines) if l.startswith(("[!", "[x", "[-"))),
-            "Unknown error — check device connection and key."
-        )
-        return False, reason
+    reason = next(
+        (l for l in reversed(lines) if l.startswith(("[!", "[x", "[-"))),
+        "Unknown error — check device connection and key."
+    )
+    return False, reason
 
 
 def write_log(status: str, detail: str = "", is_error: bool = False):
@@ -649,7 +662,7 @@ def set_title():
         write_log("Set title skipped", "Title field is empty.", is_error=True)
         return
     dispatch(
-        [sys.executable, "molto2.py", "--profile", profile, "--title", title]
+        ["--profile", profile, "--title", title]
         + get_key_args(),
         success_msg="Title set",
         error_prefix="Set title failed",
@@ -665,7 +678,7 @@ def factory_reset():
         write_log("Factory reset", "Cancelled by user.")
         return
     dispatch(
-        [sys.executable, "molto2.py", "--factoryreset"] + get_key_args(),
+        ["--factoryreset"] + get_key_args(),
         success_msg="Factory reset initiated — confirm on device",
         error_prefix="Factory reset failed",
     )
@@ -678,7 +691,7 @@ def write_seed_only():
         write_log("Write seed skipped", "Seed field is empty.", is_error=True)
         return
     dispatch(
-        [sys.executable, "molto2.py", "--profile", profile]
+        ["--profile", profile]
         + get_seed_args()
         + get_key_args(),
         success_msg=f"Seed written to profile #{profile}",
@@ -696,7 +709,7 @@ def remove_seed():
         write_log(f"Delete seed #{profile}", "Cancelled by user.")
         return
     dispatch(
-        [sys.executable, "molto2.py", "--profile", profile, "--deleteseed"]
+        ["--profile", profile, "--deleteseed"]
         + get_key_args(),
         success_msg=f"Seed deleted from profile #{profile}",
         error_prefix=f"Seed delete failed for profile #{profile}",
@@ -706,7 +719,7 @@ def remove_seed():
 def apply_only_config():
     profile = cb_profile.currentText()
     dispatch(
-        [sys.executable, "molto2.py", "--config", "--profile", profile]
+        ["--config", "--profile", profile]
         + get_config_args()
         + get_key_args(),
         success_msg=f"Config applied to profile #{profile}",
@@ -722,7 +735,7 @@ def provision_without_config():
         write_log("Provision skipped", "Seed field is empty.", is_error=True)
         return
     cmd = (
-        [sys.executable, "molto2.py", "--profile", profile]
+        ["--profile", profile]
         + get_seed_args()
         + (["--title", title] if title else [])
         + get_key_args()
@@ -742,7 +755,7 @@ def provision_with_config():
 
     # Step 1: apply config first (requires empty profile)
     cmd_cfg = (
-        [sys.executable, "molto2.py", "--config", "--profile", profile]
+        ["--config", "--profile", profile]
         + get_config_args()
         + get_key_args()
     )
@@ -754,7 +767,7 @@ def provision_with_config():
 
     # Step 2: write seed (+ optional title)
     cmd_seed = (
-        [sys.executable, "molto2.py", "--profile", profile]
+        ["--profile", profile]
         + get_seed_args()
         + (["--title", title] if title else [])
         + get_key_args()
@@ -773,7 +786,7 @@ def provision():
 
 def lock_device():
     dispatch(
-        [sys.executable, "molto2.py", "--lock"] + get_key_args(),
+        ["--lock"] + get_key_args(),
         success_msg="Device screen locked",
         error_prefix="Lock failed",
     )
@@ -781,7 +794,7 @@ def lock_device():
 
 def unlock_device():
     dispatch(
-        [sys.executable, "molto2.py", "--unlock"] + get_key_args(),
+        ["--unlock"] + get_key_args(),
         success_msg="Device screen unlocked",
         error_prefix="Unlock failed",
     )
@@ -790,7 +803,7 @@ def unlock_device():
 def sync_time_one():
     profile = cb_sync_profile.currentText()
     dispatch(
-        [sys.executable, "molto2.py", "--profile", profile, "--synctime"]
+        ["--profile", profile, "--synctime"]
         + get_key_args(),
         success_msg=f"Time synced on profile #{profile}",
         error_prefix=f"Time sync failed for profile #{profile}",
@@ -806,7 +819,7 @@ def sync_time_all():
         write_log("Sync all profiles", "Cancelled by user.")
         return
     dispatch(
-        [sys.executable, "molto2.py", "--synctimeall"] + get_key_args(),
+        ["--synctimeall"] + get_key_args(),
         success_msg="Time synced on ALL profiles",
         error_prefix="Time sync (all profiles) failed",
     )
@@ -841,7 +854,7 @@ def set_customer_key():
 
     key_flag = "--setkey" if use_hex else "--setkeyascii"
     dispatch(
-        [sys.executable, "molto2.py", key_flag, new_key] + get_key_args(),
+        [key_flag, new_key] + get_key_args(),
         success_msg="Customer key change sent — confirm on device (▲)",
         error_prefix="Customer key change failed",
     )
