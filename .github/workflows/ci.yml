@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install test dependencies
+        # Only sm4 (pure Python) is needed to import molto2 and run the tests —
+        # pyscard/PyQt5 are not required because the smartcard import is lazy
+        # and the GUI files are only syntax-checked, not imported.
+        run: pip install sm4 pytest ruff
+
+      - name: Syntax check (compile all modules)
+        run: python -m py_compile molto2.py gui.py gui-single.py
+
+      - name: Lint (non-blocking for now)
+        # Report lint findings without failing the build; tighten over time.
+        run: ruff check --exit-zero molto2.py tests
+
+      - name: Unit tests
+        run: pytest -q
