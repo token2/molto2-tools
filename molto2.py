@@ -68,6 +68,19 @@ def validate_profile_number(profile):
     return n
 
 
+def hexadecimal_to_binary_key(key_hex :str) -> bytes:
+    """Convert hexadecimal key string into a binary key string while
+       validating that it has exactly 16 bytes.
+    """
+    try:
+        key = unhexlify(key_hex)
+    except (ValueError, TypeError):
+        die("[!] Customer key is not valid hex.")
+    if len(key) != 16:
+        die(f"[!] Customer key must be 16 bytes ({len(key)} provided).")
+    return key
+
+
 def resolve_customer_key(key_hex=None, key_ascii=None) -> bytes:
     """Resolve the 16-byte customer key from --key/--keyascii or the default.
 
@@ -82,13 +95,7 @@ def resolve_customer_key(key_hex=None, key_ascii=None) -> bytes:
     else:
         hexstr = key_hex
 
-    try:
-        key = unhexlify(hexstr)
-    except (ValueError, TypeError):
-        die("[!] Customer key is not valid hex.")
-    if len(key) != 16:
-        die(f"[!] Customer key must be 16 bytes ({len(key)} provided).")
-    return key
+    return hexadecimal_to_binary_key(hexstr)
 
 
 def base32_to_hex(seedbase32: str) -> str:
@@ -479,9 +486,10 @@ def set_customer_key(connection, key_sha1, args):
         print(f"[i] New customer key hex value is: {hexkey}")
 
     if hexkey != "":
+        key = hexadecimal_to_binary_key(hexkey)
         # set customer key
         print(f"[i] Setting new key ")
-        newkey_sha1 = hashlib.sha1(unhexlify(hexkey)).digest()[:16]
+        newkey_sha1 = hashlib.sha1(key).digest()[:16]
         encData = unhexlify("00") + newkey_sha1 + unhexlify("800000000000000000000000000000")
         sm4 = SM4Key(key_sha1)
         SM4encData = sm4.encrypt(encData)
