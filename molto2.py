@@ -87,7 +87,7 @@ def resolve_customer_key(key_hex=None, key_ascii=None) -> bytes:
     except (ValueError, TypeError):
         die("[!] Customer key is not valid hex.")
     if len(key) != 16:
-        die(f"[!] Customer key must be 16 bytes ({len(key)} provided).")
+        print(f"[!] Customer key should have 16 bytes ({len(key)} provided).")
     return key
 
 
